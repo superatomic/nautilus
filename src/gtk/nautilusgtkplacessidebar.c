@@ -684,6 +684,7 @@ update_places (NautilusGtkPlacesSidebar *sidebar)
       g_object_unref (start_icon);
     }
 
+  if (FALSE) {
   start_icon = g_themed_icon_new_with_default_fallbacks ("starred-symbolic");
   add_place (sidebar, NAUTILUS_GTK_PLACES_BUILT_IN,
              NAUTILUS_GTK_PLACES_SECTION_DEFAULT_LOCATIONS,
@@ -691,6 +692,7 @@ update_places (NautilusGtkPlacesSidebar *sidebar)
              NULL, NULL, NULL, NULL, 0,
              _("Starred Files"));
   g_object_unref (start_icon);
+  }
 
   /* desktop */
   if (sidebar->show_desktop)
@@ -1070,7 +1072,7 @@ update_places (NautilusGtkPlacesSidebar *sidebar)
       g_free (mount_uri);
       g_free (tooltip);
     }
-  
+
 
   g_list_free_full (network_volumes, g_object_unref);
   g_list_free_full (network_mounts, g_object_unref);
@@ -1539,7 +1541,7 @@ drag_drop_callback (GtkDropTarget    *target,
               actions = gdk_drag_get_selected_action (drag);
           }
           #endif
-          
+
           emit_drag_perform_drop (sidebar,
                                   dest_file,
                                   g_value_get_boxed (value),
