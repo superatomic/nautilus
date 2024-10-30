@@ -198,6 +198,7 @@ enum {
 
 /* Names for themed icons */
 #define ICON_NAME_HOME     "user-home-symbolic"
+#define ICON_NAME_ROOT     "drive-harddisk-system-symbolic"
 #define ICON_NAME_DESKTOP  "user-desktop-symbolic"
 #define ICON_NAME_EJECT    "media-eject-symbolic"
 #define ICON_NAME_NETWORK  "network-workgroup-symbolic"
@@ -672,6 +673,15 @@ update_places (NautilusGtkPlacesSidebar *sidebar)
              _("Open Personal Folder"));
   g_object_unref (start_icon);
   g_free (home_uri);
+
+  /* root folder */
+  start_icon = g_themed_icon_new_with_default_fallbacks (ICON_NAME_ROOT);
+  add_place (sidebar, NAUTILUS_GTK_PLACES_BUILT_IN,
+             NAUTILUS_GTK_PLACES_SECTION_DEFAULT_LOCATIONS,
+             _("System"), start_icon, NULL, "file:///",
+             NULL, NULL, NULL, NULL, 0,
+             _("Open Root Folder"));
+  g_object_unref (start_icon);
 
   if (should_show_recent (sidebar))
     {
