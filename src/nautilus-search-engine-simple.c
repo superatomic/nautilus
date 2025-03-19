@@ -327,13 +327,17 @@ visit_directory (GFile            *dir,
             goto next;
         }
 
-        is_hidden = g_file_info_get_attribute_boolean (info,
-                                                       G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN) ||
-                    g_file_info_get_attribute_boolean (info,
-                                                       G_FILE_ATTRIBUTE_STANDARD_IS_BACKUP);
-        if (is_hidden && !nautilus_query_get_show_hidden_files (data->query))
+        if (!nautilus_query_get_show_hidden_files (data->query))
         {
-            goto next;
+            is_hidden = g_file_info_get_attribute_boolean (info,
+                                                           G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN) ||
+                        g_file_info_get_attribute_boolean (info,
+                                                           G_FILE_ATTRIBUTE_STANDARD_IS_BACKUP);
+
+            if (is_hidden)
+            {
+                goto next;
+            }
         }
 
         child = g_file_get_child (dir, g_file_info_get_name (info));
@@ -488,7 +492,6 @@ search_thread_func (gpointer user_data)
     const char *id;
 
     data = user_data;
-
     /* Insert id for toplevel directory into visited */
     dir = g_queue_peek_head (data->directories);
     info = g_file_query_info (dir, G_FILE_ATTRIBUTE_ID_FILE, 0, data->cancellable, NULL);

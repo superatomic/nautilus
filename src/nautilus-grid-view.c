@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <glib/gi18n.h>
+
 #include "nautilus-list-base-private.h"
 #include "nautilus-grid-view.h"
 
@@ -54,8 +56,8 @@ nautilus_grid_view_sort (gconstpointer a,
     NautilusFile *file_a;
     NautilusFile *file_b;
 
-    file_a = nautilus_view_item_get_file (NAUTILUS_VIEW_ITEM ((gpointer) a));
-    file_b = nautilus_view_item_get_file (NAUTILUS_VIEW_ITEM ((gpointer) b));
+    file_a = nautilus_view_item_get_file ((NautilusViewItem *) a);
+    file_b = nautilus_view_item_get_file ((NautilusViewItem *) b);
 
     return nautilus_file_compare_for_sort_by_attribute_q (file_a, file_b,
                                                           self->sort_attribute,
@@ -322,14 +324,6 @@ real_get_icon_size (NautilusListBase *list_base_view)
     return get_icon_size_for_zoom_level (self->zoom_level);
 }
 
-static GtkWidget *
-real_get_view_ui (NautilusListBase *list_base_view)
-{
-    NautilusGridView *self = NAUTILUS_GRID_VIEW (list_base_view);
-
-    return GTK_WIDGET (self->view_ui);
-}
-
 static int
 real_get_zoom_level (NautilusListBase *list_base_view)
 {
@@ -357,6 +351,15 @@ real_get_sort_state (NautilusListBase *list_base)
     return g_variant_take_ref (g_variant_new ("(sb)",
                                               g_quark_to_string (self->sort_attribute),
                                               self->reversed));
+}
+
+static void
+real_set_enable_rubberband (NautilusListBase *list_base,
+                            gboolean          enabled)
+{
+    NautilusGridView *self = NAUTILUS_GRID_VIEW (list_base);
+
+    gtk_grid_view_set_enable_rubberband (self->view_ui, enabled);
 }
 
 static void
@@ -508,6 +511,13 @@ create_view_ui (NautilusGridView *self)
     gtk_grid_view_set_max_columns (GTK_GRID_VIEW (widget), 20);
     gtk_grid_view_set_tab_behavior (GTK_GRID_VIEW (widget), GTK_LIST_TAB_ITEM);
 
+    gtk_accessible_update_property (GTK_ACCESSIBLE (widget),
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                    _("Content View"),
+                                    GTK_ACCESSIBLE_PROPERTY_ROLE_DESCRIPTION,
+                                    _("View of the current location"),
+                                    -1);
+
     /* While we don't want to use GTK's click activation, we'll let it handle
      * the key activation part (with Enter).
      */
@@ -528,10 +538,10 @@ nautilus_grid_view_class_init (NautilusGridViewClass *klass)
     list_base_view_class->get_icon_size = real_get_icon_size;
     list_base_view_class->get_sort_state = real_get_sort_state;
     list_base_view_class->get_view_info = real_get_view_info;
-    list_base_view_class->get_view_ui = real_get_view_ui;
     list_base_view_class->get_zoom_level = real_get_zoom_level;
     list_base_view_class->preview_selection_event = real_preview_selection_event;
     list_base_view_class->scroll_to = real_scroll_to;
+    list_base_view_class->set_enable_rubberband = real_set_enable_rubberband;
     list_base_view_class->set_sort_state = real_set_sort_state;
     list_base_view_class->set_zoom_level = real_set_zoom_level;
     list_base_view_class->setup_directory = nautilus_grid_view_setup_directory;

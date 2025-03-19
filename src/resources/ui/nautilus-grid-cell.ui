@@ -3,9 +3,6 @@
   <requires lib="gtk" version="4.0"/>
   <template class="NautilusGridCell" parent="NautilusViewCell">
     <property name="valign">start</property>
-    <accessibility>
-      <relation name="labelled-by">label</relation>
-    </accessibility>
     <child>
       <object class="AdwClamp">
         <property name="maximum-size">0</property>
@@ -19,7 +16,7 @@
                 <property name="halign">center</property>
                 <property name="margin-start">18</property>
                 <child>
-                  <object class="AdwClamp">
+                  <object class="AdwClamp" id="icon_bin">
                     <property name="maximum-size">0</property>
                     <property name="child">
                       <object class="GtkPicture" id="icon">

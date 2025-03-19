@@ -188,6 +188,8 @@ nautilus_directory_finalize (GObject *object)
     nautilus_hash_queue_destroy (directory->details->high_priority_queue);
     nautilus_hash_queue_destroy (directory->details->low_priority_queue);
     nautilus_hash_queue_destroy (directory->details->extension_queue);
+    g_clear_pointer (&directory->details->call_when_ready_hash.unsatisfied, g_hash_table_unref);
+    g_clear_pointer (&directory->details->call_when_ready_hash.ready, g_hash_table_unref);
     g_clear_list (&directory->details->files_changed_while_adding, g_object_unref);
     g_assert (directory->details->directory_load_in_progress == NULL);
     g_assert (directory->details->count_in_progress == NULL);
@@ -316,6 +318,8 @@ nautilus_directory_init (NautilusDirectory *directory)
     directory->details->high_priority_queue = nautilus_hash_queue_new (g_direct_hash, g_direct_equal, g_object_ref, g_object_unref);
     directory->details->low_priority_queue = nautilus_hash_queue_new (g_direct_hash, g_direct_equal, g_object_ref, g_object_unref);
     directory->details->extension_queue = nautilus_hash_queue_new (g_direct_hash, g_direct_equal, g_object_ref, g_object_unref);
+    directory->details->call_when_ready_hash.unsatisfied = g_hash_table_new (NULL, NULL);
+    directory->details->call_when_ready_hash.ready = g_hash_table_new (NULL, NULL);
     directory->details->monitor_table = g_hash_table_new (NULL, NULL);
 }
 
@@ -576,14 +580,12 @@ NautilusFile *
 nautilus_directory_get_corresponding_file (NautilusDirectory *directory)
 {
     NautilusFile *file;
-    char *uri;
 
     file = nautilus_directory_get_existing_corresponding_file (directory);
     if (file == NULL)
     {
-        uri = nautilus_directory_get_uri (directory);
-        file = nautilus_file_get_by_uri (uri);
-        g_free (uri);
+        g_autoptr (GFile) location = nautilus_directory_get_location (directory);
+        file = nautilus_file_get (location);
     }
 
     return file;
@@ -596,7 +598,6 @@ NautilusFile *
 nautilus_directory_get_existing_corresponding_file (NautilusDirectory *directory)
 {
     NautilusFile *file;
-    char *uri;
 
     file = directory->details->as_file;
     if (file != NULL)
@@ -605,9 +606,9 @@ nautilus_directory_get_existing_corresponding_file (NautilusDirectory *directory
         return file;
     }
 
-    uri = nautilus_directory_get_uri (directory);
-    file = nautilus_file_get_existing_by_uri (uri);
-    g_free (uri);
+    g_autoptr (GFile) location = nautilus_directory_get_location (directory);
+    file = nautilus_file_get_existing (location);
+
     return file;
 }
 

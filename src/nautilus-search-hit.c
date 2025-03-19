@@ -57,6 +57,7 @@ G_DEFINE_TYPE (NautilusSearchHit, nautilus_search_hit, G_TYPE_OBJECT)
 
 void
 nautilus_search_hit_compute_scores (NautilusSearchHit *hit,
+                                    GDateTime         *now,
                                     NautilusQuery     *query)
 {
     g_autoptr (GFile) query_location = NULL;
@@ -98,9 +99,8 @@ nautilus_search_hit_compute_scores (NautilusSearchHit *hit,
     /* Recency bonus is useful for recursive search, but unwanted for results
      * from the current folder, which should always sort by filename match,
      * which makes prefix matches sort first. */
-    if (dir_count != 0)
+    if (dir_count != 0 || query_location == NULL)
     {
-        g_autoptr (GDateTime) now = g_date_time_new_now_local ();
         if (hit->modification_time != NULL)
         {
             m_diff = g_date_time_difference (now, hit->modification_time);

@@ -414,9 +414,9 @@ typedef struct
     GtkWindow *parent_window;
     char *startup_id;
     char *pending_key;
-    GHashTable *pending_files;
     NautilusPropertiesWindowCallback callback;
     gpointer callback_data;
+    NautilusFileListHandle *handle;
     NautilusPropertiesWindow *window;
     gboolean cancelled;
 } StartupData;
@@ -448,8 +448,8 @@ static void value_row_update (AdwActionRow             *row,
                               NautilusPropertiesWindow *self);
 static void properties_window_update (NautilusPropertiesWindow *self,
                                       GList                    *files);
-static void is_directory_ready_callback (NautilusFile *file,
-                                         gpointer      data);
+static void is_directory_ready_callback (GList   *file_list,
+                                         gpointer data);
 static void cancel_group_change_callback (GroupChange *change);
 static void cancel_owner_change_callback (OwnerChange *change);
 static void update_owner_row (AdwComboRow     *row,
@@ -819,8 +819,6 @@ setup_image_widget (NautilusPropertiesWindow *self)
     gtk_widget_add_controller (self->icon_overlay, GTK_EVENT_CONTROLLER (target));
     g_signal_connect (target, "drop",
                       G_CALLBACK (nautilus_properties_window_drag_drop_cb), self->icon_image);
-
-    update_image_widget (self);
 }
 
 static void
@@ -1297,6 +1295,9 @@ properties_window_update (NautilusPropertiesWindow *self,
         update_image_widget (self);
         update_name_field (self);
         update_permissions_navigation_row (self, permissions_info);
+        adw_banner_set_revealed (self->owner_permission_banner,
+                                 !permissions_info->can_set_all_file_permission ||
+                                 !permissions_info->can_set_all_folder_permission);
         update_owner_row (self->owner_row, permissions_info);
         update_group_row (self->group_row, permissions_info);
         update_execution_row (GTK_WIDGET (self->execution_row), permissions_info);
@@ -1453,7 +1454,7 @@ update_combo_row_dropdown (AdwComboRow *row,
 }
 
 typedef gboolean CompareOwnershipRowFunc (GListModel *list,
-                                          guint position,
+                                          guint       position,
                                           const char *str);
 
 static void
@@ -1852,8 +1853,6 @@ update_owner_row (AdwComboRow     *row,
     gboolean provide_dropdown = (!permissions_info->is_multi_file_window
                                  && nautilus_file_can_set_owner (get_file (self)));
     gboolean had_dropdown = gtk_widget_is_sensitive (GTK_WIDGET (row));
-
-    gtk_widget_set_sensitive (GTK_WIDGET (row), provide_dropdown);
 
     /* check if should provide dropdown */
     if (provide_dropdown)
@@ -3096,25 +3095,6 @@ all_can_get_permissions (GList *file_list)
     return TRUE;
 }
 
-static gboolean
-all_can_set_permissions (GList *file_list)
-{
-    GList *l;
-    for (l = file_list; l != NULL; l = l->next)
-    {
-        NautilusFile *file;
-
-        file = NAUTILUS_FILE (l->data);
-
-        if (!nautilus_file_can_set_permissions (file))
-        {
-            return FALSE;
-        }
-    }
-
-    return TRUE;
-}
-
 static GHashTable *
 get_initial_permissions (GList *file_list)
 {
@@ -3520,11 +3500,6 @@ setup_permissions_page (NautilusPropertiesWindow *self)
         self->initial_permissions = get_initial_permissions (self->files);
         self->has_recursive_apply = files_has_changable_permissions_directory (self);
 
-        if (!all_can_set_permissions (self->files))
-        {
-            adw_banner_set_revealed (self->owner_permission_banner, TRUE);
-        }
-
         gtk_stack_set_visible_child_name (GTK_STACK (self->permissions_stack), "permissions-box");
         create_simple_permissions (self);
 
@@ -3647,7 +3622,6 @@ startup_data_new (GList                            *files,
                   NautilusPropertiesWindow         *window)
 {
     StartupData *data;
-    GList *l;
 
     data = g_new0 (StartupData, 1);
     data->files = nautilus_file_list_copy (files);
@@ -3655,16 +3629,9 @@ startup_data_new (GList                            *files,
     data->parent_window = parent_window;
     data->startup_id = g_strdup (startup_id);
     data->pending_key = g_strdup (pending_key);
-    data->pending_files = g_hash_table_new (g_direct_hash,
-                                            g_direct_equal);
     data->callback = callback;
     data->callback_data = callback_data;
     data->window = window;
-
-    for (l = data->files; l != NULL; l = l->next)
-    {
-        g_hash_table_insert (data->pending_files, l->data, l->data);
-    }
 
     return data;
 }
@@ -3673,7 +3640,6 @@ static void
 startup_data_free (StartupData *data)
 {
     nautilus_file_list_free (data->files);
-    g_hash_table_destroy (data->pending_files);
     g_free (data->pending_key);
     g_free (data->startup_id);
     g_free (data);
@@ -3804,26 +3770,13 @@ parent_widget_destroyed_callback (GtkWidget *widget,
 }
 
 static void
-cancel_call_when_ready_callback (gpointer key,
-                                 gpointer value,
-                                 gpointer user_data)
-{
-    nautilus_file_cancel_call_when_ready
-        (NAUTILUS_FILE (key),
-        is_directory_ready_callback,
-        user_data);
-}
-
-static void
 remove_pending (StartupData *startup_data,
                 gboolean     cancel_call_when_ready,
                 gboolean     cancel_timed_wait)
 {
     if (cancel_call_when_ready)
     {
-        g_hash_table_foreach (startup_data->pending_files,
-                              cancel_call_when_ready_callback,
-                              startup_data);
+        nautilus_file_list_cancel_call_when_ready (startup_data->handle);
     }
     if (cancel_timed_wait)
     {
@@ -3854,32 +3807,22 @@ widget_on_destroy (GtkWidget *widget,
 }
 
 static void
-is_directory_ready_callback (NautilusFile *file,
-                             gpointer      data)
+is_directory_ready_callback (GList    *file_list,
+                             gpointer  data)
 {
-    StartupData *startup_data;
+    StartupData *startup_data = data;
+    NautilusPropertiesWindow *new_window = create_properties_window (startup_data);
 
-    startup_data = data;
+    startup_data->window = new_window;
 
-    g_hash_table_remove (startup_data->pending_files, file);
+    remove_pending (startup_data, FALSE, TRUE);
 
-    if (g_hash_table_size (startup_data->pending_files) == 0)
-    {
-        NautilusPropertiesWindow *new_window;
+    gtk_window_present (GTK_WINDOW (new_window));
+    g_signal_connect (GTK_WIDGET (new_window), "destroy",
+                      G_CALLBACK (widget_on_destroy), startup_data);
 
-        new_window = create_properties_window (startup_data);
-
-        startup_data->window = new_window;
-
-        remove_pending (startup_data, FALSE, TRUE);
-
-        gtk_window_present (GTK_WINDOW (new_window));
-        g_signal_connect (GTK_WIDGET (new_window), "destroy",
-                          G_CALLBACK (widget_on_destroy), startup_data);
-
-        /* We wish the label to be selectable, but not selected by default. */
-        gtk_label_select_region (GTK_LABEL (new_window->name_value_label), -1, -1);
-    }
+    /* We wish the label to be selectable, but not selected by default. */
+    gtk_label_select_region (GTK_LABEL (new_window->name_value_label), -1, -1);
 }
 
 void
@@ -3889,7 +3832,6 @@ nautilus_properties_window_present (GList                            *files,
                                     NautilusPropertiesWindowCallback  callback,
                                     gpointer                          callback_data)
 {
-    GList *l, *next;
     GtkWindow *parent_window;
     StartupData *startup_data;
     g_autofree char *pending_key = NULL;
@@ -3948,15 +3890,11 @@ nautilus_properties_window_present (GList                            *files,
         _("Creating Properties window."),
         parent_window == NULL ? NULL : GTK_WINDOW (parent_window));
 
-    for (l = startup_data->files; l != NULL; l = next)
-    {
-        next = l->next;
-        nautilus_file_call_when_ready
-            (NAUTILUS_FILE (l->data),
-            NAUTILUS_FILE_ATTRIBUTE_INFO,
-            is_directory_ready_callback,
-            startup_data);
-    }
+    nautilus_file_list_call_when_ready (startup_data->files,
+                                        NAUTILUS_FILE_ATTRIBUTE_INFO,
+                                        &startup_data->handle,
+                                        is_directory_ready_callback,
+                                        startup_data);
 }
 
 static void

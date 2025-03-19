@@ -1,9 +1,39 @@
 include:
   - project: "GNOME/citemplates"
     file: "flatpak/flatpak_ci_initiative.yml"
+  - project: "Infrastructure/freedesktop-ci-templates"
+    file: "templates/fedora.yml"
+  - component: gitlab.gnome.org/GNOME/citemplates/release-service@master
+    inputs:
+      job-stage: release
+      dist-job-name: "flatpak@x86_64"
+      tarball-artifact-path: "${TARBALL_ARTIFACT_PATH}"
 
 variables:
+    DEPENDENCIES:
+        git
+        gcc
+        meson
+        libasan
+        uncrustify
+        glibc-devel
+        glib2-devel
+        gtk4-devel
+        libadwaita-devel
+        libselinux-devel
+        gettext
+        libgexiv2-devel
+        localsearch
+        dbus-daemon
+        gnome-desktop4-devel
+        gnome-autoar-devel
+        libportal-devel
+        libportal-gtk4-devel
+        libcloudproviders-devel
     GIT_SUBMODULE_STRATEGY: normal
+    MESON_BUILD_DIR: _build
+    CI_REGISTRY_IMAGE: registry.gitlab.gnome.org/gnome/nautilus
+    TARBALL_ARTIFACT_PATH: ".flatpak-builder/build/nautilus/_flatpak_build/meson-dist/${CI_PROJECT_NAME}-${CI_COMMIT_TAG}.tar.xz"
 
 stages:
     - image
@@ -11,6 +41,7 @@ stages:
     - test
     - analyze
     - deploy
+    - release
 
 .vars-devel:
     variables:
@@ -19,16 +50,30 @@ stages:
         RUNTIME_REPO: "https://nightly.gnome.org/gnome-nightly.flatpakrepo"
         APP_ID: "org.gnome.NautilusDevel"
         BUNDLE: "nautilus-dev.flatpak"
+    rules:
+        # Disable tests for protected tags
+        - if: $CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED
+          variables:
+              CONFIG_OPTS: '--libdir=/app/lib -Dprofile=Devel -Dtests=none'
+        - when: always
 
 workflow:
   rules:
-    # run merge request pipelines, for main or release branches and for manually
-    # triggered pipelines (source "web"), but not for translation updates
-    - if: ($CI_PIPELINE_SOURCE == "merge_request_event" || 
+    # Run merge request pipelines, for main or release branches, for manually
+    # triggered pipelines (source "web"), and tags, but not for translation updates
+    - if: ($CI_PIPELINE_SOURCE == "merge_request_event" ||
+           $CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED ||
            $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH ||
            $CI_COMMIT_BRANCH =~ /^gnome-.*$/ ||
            $CI_PIPELINE_SOURCE == "web") &&
           $CI_COMMIT_TITLE !~ /^Update.*translation$/
+
+.nautilus.fedora:
+    variables:
+        FDO_DISTRIBUTION_VERSION: rawhide
+        FDO_DISTRIBUTION_TAG: '2025-02-28'
+        FDO_DISTRIBUTION_COMPRESSION_FORMAT: zstd:chunked
+
 
 flatpak@x86_64:
     extends: ['.flatpak@x86_64', '.vars-devel']
@@ -50,13 +95,17 @@ nightly@aarch64:
     needs: ['flatpak@aarch64']
 
 potfile:
-    image: registry.gitlab.gnome.org/gnome/nautilus:latest
+    extends:
+        - .fdo.distribution-image@fedora
+        - .nautilus.fedora
     stage: review
     script:
         - data/check-potfiles.sh
 
 style check:
-    image: registry.gitlab.gnome.org/gnome/nautilus:latest
+    extends:
+        - .fdo.distribution-image@fedora
+        - .nautilus.fedora
     stage: review
     artifacts:
         name: 'Style check artifacts'
@@ -72,19 +121,15 @@ style check:
         - if: $CI_COMMIT_BRANCH !~ /^gnome-.*$/
 
 update image:
-    variables:
-         STORAGE_DRIVER: vfs
-         BUILDAH_FORMAT: docker
-         BUILDAH_ISOLATION: chroot
-    image: registry.fedoraproject.org/fedora:latest
+    extends:
+    - .fdo.container-build@fedora
+    - .nautilus.fedora
     stage: image
-    script:
-        - dnf install -y buildah runc
-        - buildah bud --tag $CI_REGISTRY_IMAGE -f .gitlab/Dockerfile
-        - buildah tag $CI_REGISTRY_IMAGE "$CI_REGISTRY_IMAGE:v$CI_JOB_ID"
-        - buildah login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-        - buildah push --creds $CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD $CI_REGISTRY_IMAGE
-        - buildah push --creds $CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD "$CI_REGISTRY_IMAGE:v$CI_JOB_ID"
+    variables:
+        GIT_STRATEGY: none
+        FDO_DISTRIBUTION_PACKAGES: $DEPENDENCIES
+        FDO_DISTRIBUTION_EXEC: ".gitlab/image-script.sh"
+        CFLAGS: "-fno-omit-frame-pointer"
     when: manual
     rules:
         - if: $CI_PROJECT_NAMESPACE != "GNOME"
@@ -93,36 +138,40 @@ update image:
         - if: $CI_PIPELINE_SOURCE == "web"
 
 asan:
+    extends:
+        - .fdo.distribution-image@fedora
+        - .nautilus.fedora
     variables:
-        CFLAGS: "-fno-omit-frame-pointer -fsanitize=address"
+        CFLAGS: "-fno-omit-frame-pointer"
         LSAN_OPTIONS: suppressions=$CI_PROJECT_DIR/data/leak-suppress.txt
-    image: registry.gitlab.gnome.org/gnome/nautilus:latest
     stage: analyze
     rules:
         - when: manual
           allow_failure: true
     script:
-        - meson setup -Dextensions=false -Dintrospection=false -Dtests=all _build
-        - meson compile -C _build
-        - meson test -C _build
+        - meson setup -Db_sanitize=address -Dextensions=false -Dintrospection=false -Dtests=all $MESON_BUILD_DIR
+        - meson compile -C $MESON_BUILD_DIR
+        - meson test --suite display --suite displayless -C $MESON_BUILD_DIR
     artifacts:
         name: 'Address Sanitizer-built test results'
         when: on_failure
         paths:
-          - '_build/meson-logs/testlog.txt'
+          - $MESON_BUILD_DIR/meson-logs/testlog.txt
         reports:
-            junit: '_build/meson-logs/testlog.junit.xml'
+            junit: $MESON_BUILD_DIR/meson-logs/testlog.junit.xml
         expire_in: 7 days
 
 pages:
-    image: registry.gitlab.gnome.org/gnome/nautilus:latest
+    extends:
+        - .fdo.distribution-image@fedora
+        - .nautilus.fedora
     stage: deploy
     rules:
         - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PROJECT_NAMESPACE == "GNOME"
     script:
-        - meson setup -Ddocs=true -Dextensions=false -Dtests=none _build
-        - ninja -C _build
-        - mv _build/docs/reference/nautilus/ public/
+        - meson setup -Ddocs=true -Dextensions=false -Dtests=none $MESON_BUILD_DIR
+        - ninja -C $MESON_BUILD_DIR
+        - mv $MESON_BUILD_DIR/docs/reference/nautilus/ public/
     artifacts:
         paths:
             - public/

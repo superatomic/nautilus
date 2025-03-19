@@ -206,6 +206,7 @@ typedef struct
     GList *output_files;
     gboolean destination_decided;
     gboolean extraction_failed;
+    guint expected_total_files;
 
     gdouble base_progress;
 
@@ -2497,27 +2498,29 @@ has_trash_files (GMount *mount)
     return res;
 }
 
-static GtkWidget *
+static AdwDialog *
 create_empty_trash_prompt (UnmountData *data)
 {
-    GtkWidget *dialog;
+    AdwDialog *dialog;
     g_autofree gchar *name = g_mount_get_name (data->mount);
-    g_autofree gchar *trash_dialog = g_strdup_printf (_("Empty the trash to free "
-                                                        "up space on “%s”. All trashed items will "
-                                                        "be permanently deleted."), name);
 
-    dialog = adw_message_dialog_new (data->parent_window,
-                                     _("Empty Trash Before Ejecting?"),
-                                     trash_dialog);
-    adw_message_dialog_add_responses (ADW_MESSAGE_DIALOG (dialog),
-                                      "cancel", _("Cancel"),
-                                      "do-not-empty", _("Do _Not Empty"),
-                                      "empty-trash", _("_Empty"),
-                                      NULL);
-    adw_message_dialog_set_default_response (ADW_MESSAGE_DIALOG (dialog), "empty-trash");
-    adw_message_dialog_set_close_response (ADW_MESSAGE_DIALOG (dialog), "cancel");
-    adw_message_dialog_set_response_appearance (ADW_MESSAGE_DIALOG (dialog),
-                                                "empty-trash", ADW_RESPONSE_DESTRUCTIVE);
+    dialog = adw_alert_dialog_new (_("Empty Trash Before Ejecting?"),
+                                   NULL);
+    adw_alert_dialog_format_body (ADW_ALERT_DIALOG (dialog),
+                                  _("Empty the trash to free "
+                                    "up space on “%s”. All trashed items will "
+                                    "be permanently deleted."), name);
+    adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (dialog),
+                                    "cancel", _("Cancel"),
+                                    "do-not-empty", _("Do _Not Empty"),
+                                    /* Translators: This is an action in a dialog to
+                                     * clear trashed items. */
+                                    "empty-trash", _("_Empty"),
+                                    NULL);
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "empty-trash");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
+    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+                                              "empty-trash", ADW_RESPONSE_DESTRUCTIVE);
 
     return dialog;
 }
@@ -2597,11 +2600,11 @@ nautilus_file_operations_unmount_mount_full (GtkWindow               *parent_win
 
     if (check_trash && has_trash_files (mount))
     {
-        GtkWidget *dialog;
+        AdwDialog *dialog;
         dialog = create_empty_trash_prompt (data);
 
         g_signal_connect (dialog, "response", G_CALLBACK (empty_trash_prompt_cb), data);
-        gtk_window_present (GTK_WINDOW (dialog));
+        adw_dialog_present (dialog, GTK_WIDGET (parent_window));
         return;
     }
 
@@ -4760,7 +4763,8 @@ static FileConflictResponse *
 handle_copy_move_conflict (CommonJob *job,
                            GFile     *src,
                            GFile     *dest,
-                           GFile     *dest_dir)
+                           GFile     *dest_dir,
+                           gboolean   dest_is_dir)
 {
     FileConflictResponse *response;
     g_autofree gchar *basename = NULL;
@@ -4774,7 +4778,7 @@ handle_copy_move_conflict (CommonJob *job,
     should_start_inactive = is_long_job (job);
 
     basename = g_file_get_basename (dest);
-    suggested_file = nautilus_generate_unique_file_in_directory (dest_dir, basename);
+    suggested_file = nautilus_generate_unique_file_in_directory (dest_dir, basename, dest_is_dir);
     suggestion = g_file_get_basename (suggested_file);
 
     response = copy_move_conflict_ask_user_action (job->parent_window,
@@ -5140,9 +5144,6 @@ retry:
         gboolean is_merge;
         FileConflictResponse *response;
 
-        source_is_directory = is_dir (src, job->cancellable);
-        destination_is_directory = is_dir (dest, job->cancellable);
-
         g_error_free (error);
 
         if (unique_names)
@@ -5151,6 +5152,9 @@ retry:
             dest = get_unique_target_file (src, dest_dir, job->cancellable, same_fs, *dest_fs_type, unique_name_nr++);
             goto retry;
         }
+
+        source_is_directory = is_dir (src, job->cancellable);
+        destination_is_directory = is_dir (dest, job->cancellable);
 
         is_merge = FALSE;
 
@@ -5177,7 +5181,7 @@ retry:
             goto out;
         }
 
-        response = handle_copy_move_conflict (job, src, dest, dest_dir);
+        response = handle_copy_move_conflict (job, src, dest, dest_dir, destination_is_directory);
 
         if (response->id == CONFLICT_RESPONSE_CANCEL)
         {
@@ -5933,7 +5937,7 @@ retry:
             goto out;
         }
 
-        response = handle_copy_move_conflict (job, src, dest, dest_dir);
+        response = handle_copy_move_conflict (job, src, dest, dest_dir, destination_is_directory);
 
         if (response->id == CONFLICT_RESPONSE_CANCEL)
         {
@@ -7903,13 +7907,18 @@ extract_job_on_decide_destination (AutoarExtractor *extractor,
     ExtractJob *extract_job = user_data;
     GFile *decided_destination;
     g_autofree char *basename = NULL;
+    gboolean dest_is_dir;
 
     nautilus_progress_info_set_details (extract_job->common.progress,
                                         _("Verifying destination"));
 
+    /* This doesn't work when the archive has a single empty directory, but
+     * that's okay since it's a dumb archive. */
+    dest_is_dir = extract_job->expected_total_files > 1;
+
     basename = g_file_get_basename (destination);
     decided_destination = nautilus_generate_unique_file_in_directory (extract_job->destination_directory,
-                                                                      basename);
+                                                                      basename, dest_is_dir);
 
     if (job_aborted ((CommonJob *) extract_job))
     {
@@ -8145,19 +8154,16 @@ extract_job_on_scanned (AutoarExtractor *extractor,
                         guint            total_files,
                         gpointer         user_data)
 {
-    guint64 total_size;
-    ExtractJob *extract_job;
-    GFile *source_file;
-    g_autofree gchar *basename = NULL;
     g_autoptr (GFileInfo) fsinfo = NULL;
     guint64 free_size;
 
-    extract_job = user_data;
-    total_size = autoar_extractor_get_total_size (extractor);
-    source_file = autoar_extractor_get_source_file (extractor);
-    basename = get_basename (source_file);
+    guint64 total_size = autoar_extractor_get_total_size (extractor);
+    GFile *output_file = autoar_extractor_get_output_file (extractor);
 
-    fsinfo = g_file_query_filesystem_info (source_file,
+    ExtractJob *extract_job = user_data;
+    extract_job->expected_total_files = total_files;
+
+    fsinfo = g_file_query_filesystem_info (output_file,
                                            G_FILE_ATTRIBUTE_FILESYSTEM_FREE ","
                                            G_FILE_ATTRIBUTE_FILESYSTEM_READONLY,
                                            extract_job->common.cancellable,
@@ -8170,6 +8176,9 @@ extract_job_on_scanned (AutoarExtractor *extractor,
      */
     if (total_size != G_MAXUINT64 && total_size > free_size)
     {
+        GFile *source_file = autoar_extractor_get_source_file (extractor);
+        g_autofree gchar *basename = get_basename (source_file);
+
         nautilus_progress_info_take_status (extract_job->common.progress,
                                             g_strdup_printf (_("Error extracting “%s”"),
                                                              basename));
@@ -8196,11 +8205,11 @@ report_extract_final_progress (ExtractJob *extract_job)
                                             extract_job->destination_directory);
     basename_dest = get_basename (extract_job->destination_directory);
 
-    /* The g_list_length function is used intentionally here instead of the
+    /* extract_job->source_files variable is used intentionally here instead of the
      * extract_job->total_files variable to avoid printing wrong basename in
      * the case of skipped files.
      */
-    if (g_list_length (extract_job->source_files) == 1)
+    if (extract_job->source_files != NULL && extract_job->source_files->next == NULL)
     {
         GFile *source_file;
         g_autofree gchar *basename = NULL;

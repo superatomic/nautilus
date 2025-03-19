@@ -1129,7 +1129,9 @@ hover_timer (gpointer user_data)
                                                  NAUTILUS_PREFERENCES_OPEN_FOLDER_ON_DND_HOVER);
   sidebar->hover_timer_id = 0;
 
-  if (open_folder_on_hover && sidebar->hover_row != NULL)
+  if (open_folder_on_hover &&
+      sidebar->hover_row != NULL &&
+      gtk_widget_get_sensitive (GTK_WIDGET (sidebar->hover_row)))
     {
       g_object_get (sidebar->hover_row, "uri", &uri, NULL);
       if (uri != NULL && g_strcmp0 (uri, SCHEME_TRASH ":///") != 0)
@@ -1312,7 +1314,8 @@ drag_motion_callback (GtkDropTarget    *target,
   row = gtk_list_box_get_row_at_y (GTK_LIST_BOX (sidebar->list_box), y);
 
   start = sidebar->hover_start_point;
-  if (sidebar->drag_row == NULL &&
+  if (row != NULL &&
+      sidebar->drag_row == NULL &&
       (row != sidebar->hover_row ||
       gtk_drag_check_threshold (GTK_WIDGET (sidebar), start.x, start.y, x, y)))
     {
@@ -3294,6 +3297,15 @@ list_box_sort_func (GtkListBoxRow *row1,
           else
             retval = index_1 - index_2;
         }
+      /* Placeholder for dropping a row comes before the "New Bookmark" row. */
+      else if (place_type_1 == NAUTILUS_GTK_PLACES_DROP_FEEDBACK && place_type_2 == NAUTILUS_GTK_PLACES_BOOKMARK_PLACEHOLDER)
+        {
+          retval = 1;
+        }
+      else if (place_type_1 == NAUTILUS_GTK_PLACES_BOOKMARK_PLACEHOLDER && place_type_2 == NAUTILUS_GTK_PLACES_DROP_FEEDBACK)
+        {
+          retval = -1;
+        }
     }
   else
     {
@@ -3473,6 +3485,7 @@ nautilus_gtk_places_sidebar_init (NautilusGtkPlacesSidebar *sidebar)
                               list_box_sort_func, NULL, NULL);
   gtk_list_box_set_selection_mode (GTK_LIST_BOX (sidebar->list_box), GTK_SELECTION_SINGLE);
   gtk_list_box_set_activate_on_single_click (GTK_LIST_BOX (sidebar->list_box), TRUE);
+  gtk_list_box_set_tab_behavior (GTK_LIST_BOX (sidebar->list_box), GTK_LIST_TAB_ITEM);
 
   g_signal_connect (sidebar->list_box, "row-activated",
                     G_CALLBACK (on_row_activated), sidebar);

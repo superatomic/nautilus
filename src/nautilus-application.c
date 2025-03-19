@@ -32,6 +32,7 @@
 #include <fcntl.h>
 #include <gdk/gdk.h>
 #include <gio/gio.h>
+#include <gio/gunixmounts.h>
 #include <glib/gi18n.h>
 #include <glib/gstdio.h>
 #include <gtk/gtk.h>
@@ -87,6 +88,8 @@ typedef struct
     NautilusFileUndoManager *undo_manager;
 
     NautilusTagManager *tag_manager;
+
+    GUnixMountMonitor *mount_monitor;
 
     NautilusDBusLauncher *dbus_launcher;
 } NautilusApplicationPrivate;
@@ -567,6 +570,8 @@ nautilus_application_finalize (GObject *object)
 
     g_clear_object (&priv->tag_manager);
 
+    g_clear_object (&priv->mount_monitor);
+
     g_clear_object (&priv->dbus_launcher);
 
     nautilus_trash_monitor_clear ();
@@ -727,7 +732,7 @@ action_help (GSimpleAction *action,
              gpointer       user_data)
 {
     GtkWindow *window;
-    GtkWidget *dialog;
+    AdwDialog *dialog;
     GtkApplication *application = user_data;
     GError *error = NULL;
 
@@ -736,15 +741,11 @@ action_help (GSimpleAction *action,
 
     if (error)
     {
-        dialog = adw_message_dialog_new (window ? GTK_WINDOW (window) : NULL,
-                                         NULL, NULL);
-        adw_message_dialog_format_heading (ADW_MESSAGE_DIALOG (dialog),
-                                           _("There was an error displaying help: \n%s"),
-                                           error->message);
-        adw_message_dialog_add_response (ADW_MESSAGE_DIALOG (dialog), "ok", _("_OK"));
-        adw_message_dialog_set_default_response (ADW_MESSAGE_DIALOG (dialog), "ok");
+        dialog = adw_alert_dialog_new (_("There was an error displaying help"), error->message);
+        adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "ok", _("_OK"));
+        adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "ok");
 
-        gtk_window_present (GTK_WINDOW (dialog));
+        adw_dialog_present (dialog, GTK_WIDGET (window));
         g_error_free (error);
     }
 }
@@ -999,6 +1000,11 @@ nautilus_application_init (NautilusApplication *self)
 
     priv->undo_manager = nautilus_file_undo_manager_new ();
     priv->tag_manager = nautilus_tag_manager_new ();
+
+    /* Retain a mount monitor so GIO's caching works. This helps to speed
+     * up various filesystem queries, e.g. those determining whether to
+     * recurse during searches. */
+    priv->mount_monitor = g_unix_mount_monitor_get ();
 
     priv->dbus_launcher = nautilus_dbus_launcher_new ();
 
@@ -1415,7 +1421,7 @@ nautilus_application_window_removed (GtkApplication *app,
     }
 
     /* if this was the last window, close the previewer */
-    if (g_list_length (priv->windows) == 0)
+    if (priv->windows == NULL)
     {
         nautilus_previewer_call_close ();
         nautilus_progress_persistence_handler_make_persistent (priv->progress_handler);

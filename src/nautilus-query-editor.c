@@ -493,8 +493,7 @@ entry_changed_internal (NautilusQueryEditor *editor)
     }
     else
     {
-        g_autofree gchar *stripped_text = g_strstrip (g_strdup (text));
-        nautilus_query_set_text (editor->query, stripped_text);
+        nautilus_query_set_text (editor->query, text);
     }
 
     nautilus_query_editor_changed (editor);
@@ -544,6 +543,7 @@ create_tag (NautilusQueryEditor *self,
     gtk_button_set_icon_name (GTK_BUTTON (button), "window-close-symbolic");
     gtk_widget_add_css_class (button, "flat");
     gtk_widget_add_css_class (button, "circular");
+    gtk_widget_set_tooltip_text (button, _("Remove Filter"));
     g_signal_connect_object (button, "clicked",
                              reset_callback, self->popover, G_CONNECT_SWAPPED);
     gtk_box_append (GTK_BOX (tag), button);
@@ -760,7 +760,8 @@ nautilus_query_editor_init (NautilusQueryEditor *editor)
 
     GtkWidget *search_info_popover = gtk_popover_new ();
     editor->status_page = adw_status_page_new ();
-    editor->search_settings_button = gtk_button_new_with_mnemonic ("_Search Settings");
+    /* translators: This opens the search panel in the Settings app. */
+    editor->search_settings_button = gtk_button_new_with_mnemonic (_("_Search Settings"));
     gtk_actionable_set_action_name (GTK_ACTIONABLE (editor->search_settings_button), "app.search-settings");
     adw_status_page_set_child (ADW_STATUS_PAGE (editor->status_page), editor->search_settings_button);
     g_signal_connect_swapped (editor->search_settings_button, "clicked", G_CALLBACK (gtk_popover_popdown), search_info_popover);

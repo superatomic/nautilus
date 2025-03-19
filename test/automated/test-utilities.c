@@ -1,5 +1,7 @@
 #include "test-utilities.h"
 
+#define ASYNC_FILE_LIMIT 100
+
 static gchar *nautilus_tmp_dir = NULL;
 
 const gchar *
@@ -20,6 +22,46 @@ test_clear_tmp_dir (void)
     {
         rmdir (nautilus_tmp_dir);
         g_clear_pointer (&nautilus_tmp_dir, g_free);
+    }
+}
+
+static gboolean config_dir_initialized = FALSE;
+
+void
+test_init_config_dir (void)
+{
+    if (config_dir_initialized == FALSE)
+    {
+        /* Initialize bookmarks */
+        g_autofree gchar *gtk3_dir = g_build_filename (g_get_user_config_dir (),
+                                                       "gtk-3.0",
+                                                       NULL);
+        g_autofree gchar *bookmarks_path = g_build_filename (gtk3_dir,
+                                                             "bookmarks",
+                                                             NULL);
+        g_autoptr (GFile) bookmarks_file = g_file_new_for_path (bookmarks_path);
+        g_autoptr (GError) error = NULL;
+
+        if (g_mkdir_with_parents (gtk3_dir, 0700) == -1)
+        {
+            int saved_errno = errno;
+
+            g_error ("Failed to create bookmarks folder %s: %s",
+                     gtk3_dir, g_strerror (saved_errno));
+            return;
+        }
+
+        g_autoptr (GFileOutputStream) stream = g_file_replace (bookmarks_file,
+                                                               NULL,
+                                                               FALSE,
+                                                               G_FILE_CREATE_REPLACE_DESTINATION,
+                                                               NULL, &error);
+        g_assert_no_error (error);
+        g_output_stream_close (G_OUTPUT_STREAM (stream), NULL, &error);
+        g_assert_no_error (error);
+
+        g_debug ("Initialized config folder %s", g_get_user_config_dir ());
+        config_dir_initialized = TRUE;
     }
 }
 
@@ -57,7 +99,7 @@ empty_directory_by_prefix (GFile *parent,
     }
 }
 
-static void
+void
 create_hierarchy_from_template (const GStrv  hier,
                                 const gchar *substitution)
 {
@@ -259,29 +301,51 @@ create_one_empty_directory (gchar *prefix)
     g_file_make_directory (second_dir, NULL, NULL);
 }
 
+static void
+create_file_cb (GObject      *source_object,
+                GAsyncResult *res,
+                gpointer      data)
+{
+    g_autoptr (GError) error = NULL;
+    g_autoptr (GFileOutputStream) out = g_file_create_finish (G_FILE (source_object), res, &error);
+    guint *count = data;
+
+    g_assert_no_error (error);
+
+    (*count)++;
+}
+
 void
 create_multiple_files (gchar *prefix,
-                       gint   number_of_files)
+                       guint  number_of_files)
 {
     g_autoptr (GFile) root = NULL;
     g_autoptr (GFile) dir = NULL;
     gchar *file_name;
+    guint count = 0;
 
     root = g_file_new_for_path (test_get_tmp_dir ());
     g_assert_true (g_file_query_exists (root, NULL));
 
-    for (int i = 0; i < number_of_files; i++)
+    for (guint i = 0; i < number_of_files; i++)
     {
-        GFileOutputStream *out;
         g_autoptr (GFile) file = NULL;
 
         file_name = g_strdup_printf ("%s_file_%i", prefix, i);
         file = g_file_get_child (root, file_name);
         g_free (file_name);
 
-        out = g_file_create (file, G_FILE_CREATE_NONE, NULL, NULL);
-        g_object_unref (out);
+        g_file_create_async (file, G_FILE_CREATE_NONE, G_PRIORITY_DEFAULT,
+                             NULL, create_file_cb, &count);
+
+        if ((i + 1) % ASYNC_FILE_LIMIT == 0)
+        {
+            /* Need to rate limit the number of open files */
+            ITER_CONTEXT_WHILE (count < i);
+        }
     }
+
+    ITER_CONTEXT_WHILE (count < number_of_files);
 
     file_name = g_strdup_printf ("%s_dir", prefix);
     dir = g_file_get_child (root, file_name);
@@ -290,18 +354,33 @@ create_multiple_files (gchar *prefix,
     g_file_make_directory (dir, NULL, NULL);
 }
 
+static void
+create_dir_cb (GObject      *source_object,
+               GAsyncResult *res,
+               gpointer      data)
+{
+    g_autoptr (GError) error = NULL;
+    g_file_make_directory_finish (G_FILE (source_object), res, &error);
+    guint *count = data;
+
+    g_assert_no_error (error);
+
+    (*count)++;
+}
+
 void
 create_multiple_directories (gchar *prefix,
-                             gint   number_of_directories)
+                             guint  number_of_directories)
 {
     g_autoptr (GFile) root = NULL;
     g_autoptr (GFile) dir = NULL;
     gchar *file_name;
+    guint count = 0;
 
     root = g_file_new_for_path (test_get_tmp_dir ());
     g_assert_true (g_file_query_exists (root, NULL));
 
-    for (int i = 0; i < number_of_directories; i++)
+    for (guint i = 0; i < number_of_directories; i++)
     {
         g_autoptr (GFile) file = NULL;
 
@@ -309,8 +388,17 @@ create_multiple_directories (gchar *prefix,
         file = g_file_get_child (root, file_name);
         g_free (file_name);
 
-        g_file_make_directory (file, NULL, NULL);
+        g_file_make_directory_async (file, G_PRIORITY_DEFAULT,
+                                     NULL, create_dir_cb, &count);
+
+        if ((i + 1) % ASYNC_FILE_LIMIT == 0)
+        {
+            /* Need to rate limit the number of open files */
+            ITER_CONTEXT_WHILE (count < i);
+        }
     }
+
+    ITER_CONTEXT_WHILE (count < number_of_directories);
 
     file_name = g_strdup_printf ("%s_destination_dir", prefix);
     dir = g_file_get_child (root, file_name);
@@ -390,14 +478,14 @@ create_fourth_hierarchy (gchar *prefix)
 
 void
 create_multiple_full_directories (gchar *prefix,
-                                  gint   number_of_directories)
+                                  guint  number_of_directories)
 {
     g_autoptr (GFile) root = NULL;
 
     root = g_file_new_for_path (test_get_tmp_dir ());
     g_assert_true (g_file_query_exists (root, NULL));
 
-    for (int i = 0; i < number_of_directories; i++)
+    for (guint i = 0; i < number_of_directories; i++)
     {
         g_autoptr (GFile) directory = NULL;
         g_autoptr (GFile) file = NULL;
@@ -408,12 +496,10 @@ create_multiple_full_directories (gchar *prefix,
         directory = g_file_get_child (root, file_name);
         g_free (file_name);
 
-        g_file_make_directory (directory, NULL, NULL);
-
         file_name = g_strdup_printf ("%s_file_%i", prefix, i);
         file = g_file_get_child (directory, file_name);
         g_free (file_name);
 
-        g_file_make_directory (file, NULL, NULL);
+        g_file_make_directory_with_parents (file, NULL, NULL);
     }
 }

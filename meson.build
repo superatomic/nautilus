@@ -3,7 +3,7 @@ project('nautilus', 'c',
 
   # Do not forget when releasing:
   #  * Set release date in data/org.gnome.Nautilus.metainfo.xml.in.in
-  version: '48.alpha',
+  version: '49.alpha',
 
   meson_version: '>= 0.59.0',
   license: 'GPL-3.0-or-later'
@@ -113,7 +113,7 @@ glib = dependency('glib-2.0', version: glib_ver)
 gmodule = dependency('gmodule-no-export-2.0', version: glib_ver)
 gnome_autoar = dependency('gnome-autoar-0', version: '>= 0.4.4')
 gnome_desktop = dependency('gnome-desktop-4', version: '>= 43')
-gtk = dependency('gtk4', version: '>= 4.15.2')
+gtk = dependency('gtk4', version: '>= 4.17.5')
 gtk_x11 = dependency('gtk4-x11', required: false)
 gtk_wayland = dependency('gtk4-wayland', required: false)
 if gtk_wayland.found()
@@ -180,6 +180,12 @@ if gtk_wayland.found()
   conf.set('HAVE_GTK_WAYLAND', 1)
 endif
 
+######################################
+# File Configuration (for xml files) #
+######################################
+file_conf = configuration_data()
+file_conf.set('appid', application_id)
+
 #############################################################
 # config.h dependency, add to target dependencies if needed #
 #############################################################
@@ -245,3 +251,16 @@ gnome.post_install(
   glib_compile_schemas: true,
   update_desktop_database: true,
 )
+
+#### Summary ####
+
+summary('Extensions', get_option('extensions').to_string(), section: 'Features')
+summary('Cloud providers support', get_option('cloudproviders'), section: 'Features')
+summary('SELinux support', get_option('selinux'), section: 'Features')
+
+summary('Profile', get_option('profile'), section: 'Build')
+summary('Debugging', get_option('debug'), section: 'Build')
+summary('Optimization', get_option('optimization'), section: 'Build')
+summary('Documentation', get_option('docs'), section: 'Build')
+summary('Introspection', get_option('introspection'), section: 'Build')
+summary('Tests', get_option('tests'), section: 'Build')

@@ -33,7 +33,8 @@ typedef struct DirectoryCountState DirectoryCountState;
 typedef struct DeepCountState DeepCountState;
 typedef struct GetInfoState GetInfoState;
 typedef struct NewFilesState NewFilesState;
-typedef struct ThumbnailState ThumbnailState;
+typedef struct ThumbnailInfoState ThumbnailInfoState;
+typedef struct ThumbnailBufState ThumbnailBufState;
 typedef struct MountState MountState;
 typedef struct FilesystemInfoState FilesystemInfoState;
 
@@ -42,8 +43,9 @@ typedef enum {
 	REQUEST_DIRECTORY_COUNT,
 	REQUEST_FILE_INFO,
 	REQUEST_FILE_LIST, /* always FALSE if file != NULL */
+	REQUEST_THUMBNAIL_INFO,
 	REQUEST_EXTENSION_INFO,
-	REQUEST_THUMBNAIL,
+	REQUEST_THUMBNAIL_BUFFER,
 	REQUEST_MOUNT,
 	REQUEST_FILESYSTEM_INFO,
 	REQUEST_TYPE_LAST
@@ -71,10 +73,16 @@ struct NautilusDirectoryPrivate
 	NautilusHashQueue *low_priority_queue;
 	NautilusHashQueue *extension_queue;
 
-	/* These lists are going to be pretty short.  If we think they
-	 * are going to get big, we can use hash tables instead.
+	/* Callbacks are inserted into ready when the callback is triggered and
+	 * scheduled to be called at idle. It's still kept in the hash table so we
+	 * can kill it when the file goes away before being called. The hash table
+	 * uses the file pointer of the ReadyCallback as a key.
 	 */
-	GList *call_when_ready_list;
+	struct
+	{
+		GHashTable *unsatisfied;
+		GHashTable *ready;
+	} call_when_ready_hash;
 	RequestCounter call_when_ready_counters;
 	GHashTable *monitor_table;
 	RequestCounter monitor_counters;
@@ -116,7 +124,9 @@ struct NautilusDirectoryPrivate
 	NautilusOperationHandle *extension_info_in_progress;
 	guint extension_info_idle;
 
-	ThumbnailState *thumbnail_state;
+	ThumbnailInfoState *thumbnail_info_state;
+
+	ThumbnailBufState *thumbnail_buf_state;
 
 	MountState *mount_state;
 
@@ -217,7 +227,8 @@ void               nautilus_directory_add_file_to_work_queue          (NautilusD
 								       NautilusFile *file);
 void               nautilus_directory_remove_file_from_work_queue     (NautilusDirectory *directory,
 								       NautilusFile *file);
-
+void               nautilus_directory_prioritze_file                  (NautilusDirectory *directory,
+                                                                       NautilusFile      *file);
 
 /* debugging functions */
 int                nautilus_directory_number_outstanding              (void);

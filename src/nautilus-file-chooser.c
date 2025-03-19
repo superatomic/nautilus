@@ -37,6 +37,7 @@ struct _NautilusFileChooser
     NautilusMode mode;
     char *accept_label;
     char *suggested_name;
+    gboolean flag_initial_focus_done;
 
     GtkWidget *split_view;
     GtkWidget *places_sidebar;
@@ -76,6 +77,8 @@ enum
 };
 
 static guint signals[LAST_SIGNAL];
+
+static void open_filename_entry (NautilusFileChooser *self);
 
 static gboolean
 mode_can_accept_files (NautilusMode  mode,
@@ -213,6 +216,11 @@ on_overwrite_confirm_response (AdwAlertDialog      *dialog,
         g_autoptr (GFile) new_file_location = g_file_get_child (parent_location, new_filename);
 
         emit_accepted (self, &(GList){ .data = new_file_location });
+    }
+    else
+    {
+        /* The user probably wants to rename the file name, so focus entry */
+        open_filename_entry (self);
     }
 }
 
@@ -677,7 +685,12 @@ nautilus_file_chooser_grab_focus (GtkWidget *widget)
 {
     NautilusFileChooser *self = NAUTILUS_FILE_CHOOSER (widget);
 
-    if (self->slot != NULL)
+    if (self->mode == NAUTILUS_MODE_SAVE_FILE && !self->flag_initial_focus_done)
+    {
+        self->flag_initial_focus_done = TRUE;
+        open_filename_entry (self);
+    }
+    else if (self->slot != NULL)
     {
         return gtk_widget_grab_focus (GTK_WIDGET (self->slot));
     }

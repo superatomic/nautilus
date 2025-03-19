@@ -10,11 +10,27 @@
 
 #pragma once
 
+#define MAX_CONTEXT_ITERATIONS 100
+
+#define ITER_CONTEXT_WHILE(CONDITION) \
+    for (guint context_iter = 0; \
+         context_iter < MAX_CONTEXT_ITERATIONS && \
+         CONDITION; \
+         context_iter++) \
+    { \
+        g_main_context_iteration (NULL, TRUE); \
+    }
+
 const gchar *test_get_tmp_dir (void);
 void test_clear_tmp_dir (void);
 
+void test_init_config_dir (void);
+
 void empty_directory_by_prefix (GFile *parent,
                                 gchar *prefix);
+
+void create_hierarchy_from_template (const GStrv  hier,
+                                     const gchar *substitution);
 
 void create_search_file_hierarchy (gchar *search_engine);
 void delete_search_file_hierarchy (gchar *search_engine);
@@ -27,9 +43,9 @@ void test_operation_undo (void);
 void create_one_file (gchar *prefix);
 void create_one_empty_directory (gchar *prefix);
 
-void create_multiple_files (gchar *prefix, gint number_of_files);
-void create_multiple_directories (gchar *prefix, gint number_of_directories);
-void create_multiple_full_directories (gchar *prefix, gint number_of_directories);
+void create_multiple_files (gchar *prefix, guint number_of_files);
+void create_multiple_directories (gchar *prefix, guint number_of_directories);
+void create_multiple_full_directories (gchar *prefix, guint number_of_directories);
 
 void create_first_hierarchy (gchar *prefix);
 void create_second_hierarchy (gchar *prefix);

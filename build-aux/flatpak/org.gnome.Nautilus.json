@@ -61,6 +61,7 @@
         "--libdir=/app/lib",
         "-Dintrospection=false",
         "-Dvapi=false",
+        "-Dtools=false",
         "-Dpython3=false"
       ],
       "sources": [
@@ -77,17 +78,20 @@
       "cleanup": [
         "/etc",
         "/libexec/localsearch-3",
-        "/share/dbus-1/services/org.freedesktop.Tracker3.Miner.Extract.service",
         "/share/dbus-1/services/org.freedesktop.Tracker3.Miner.Files.service",
-        "/share/dbus-1/services/org.freedesktop.Tracker3.Miner.Files.Control.service"
+        "/share/dbus-1/services/org.freedesktop.Tracker3.Miner.Files.Control.service",
+        "/share/dbus-1/services/org.freedesktop.LocalSearch3.service",
+        "/share/dbus-1/services/org.freedesktop.LocalSearch3.Control.service"
       ],
       "config-opts": [
+        "-Dfunctional_tests=false",
+        "-Dsandbox_tests=false",
+        "-Ddomain_prefix=org.gnome.NautilusDevel",
         "-Dextract=true",
-        "-Dgeneric_media_extractor=none",
         "-Dlandlock=disabled",
         "-Dman=false",
         "-Dminer_fs=true",
-        "-Dminer_rss=false",
+        "-Dminer_fs_cache_location=$XDG_CACHE_HOME/nautilus/miner/files",
         "-Dsystemd_user_services=false",
         "-Dwriteback=false",
         "-Dbattery_detection=none"
@@ -106,6 +110,8 @@
       "config-opts": [
         "-Ddebug_tools=false",
         "-Ddesktop_docs=false",
+        "-Dlegacy_library=false",
+        "-Dsystemd=disabled",
         "-Dudev=disabled"
       ],
       "sources": [
@@ -119,6 +125,10 @@
       "name": "gnome-autoar",
       "buildsystem": "meson",
       "builddir": true,
+      "config-opts": [
+        "-Dgtk=false",
+        "-Dintrospection=disabled"
+      ],
       "sources": [
         {
           "type": "git",
@@ -131,10 +141,11 @@
       "buildsystem": "meson",
       "builddir": true,
       "config-opts": [
-        "-Ddocs=false",
         "-Dbackend-gtk4=enabled",
         "-Dbackend-gtk3=disabled",
-        "-Dbackend-qt5=disabled",
+        "-Ddocs=false",
+        "-Dintrospection=false",
+        "-Dtests=false",
         "-Dvapi=false",
         "--libdir=/app/lib",
         "--buildtype=debugoptimized"
@@ -152,12 +163,13 @@
       "buildsystem": "meson",
       "builddir": true,
       "config-opts": [
+      	"-Dintrospection=false",
       	"-Dvapigen=false"
       ],
       "sources" : [
         {
           "type": "git",
-          "url": "https://gitlab.gnome.org/World/libcloudproviders.git"
+          "url": "https://gitlab.gnome.org/GNOME/libcloudproviders.git"
         }
       ]
     },
